@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8">
+    <title>正月ARおみくじ</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <style>
+      body {
+        margin: 0;
+        font-family: "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+        background: linear-gradient(#fff5f5, #ffeaea);
+        text-align: center;
+      }
+      
+      h1 {
+        margin-top: 20px;
+      }
+      
+      #omikuji {
+        margin: 40px auto;
+        width: 300px;
+        height: 420px;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        display: none;
+        padding: 20px;
+        animation: float 2s ease-in-out infinite;
+      }
+      
+      @keyframes float {
+        0% { transform: translateY(0); }
+        50% { transform: translateY(-8px); }
+        100% { transform: translateY(0); }
+      }
+      
+      button {
+        font-size: 20px;
+        padding: 14px 28px;
+        border-radius: 30px;
+        border: none;
+        background: #d60000;
+        color: white;
+        cursor: pointer;
+      }
+      
+      .title {
+        font-size: 28px;
+        margin-bottom: 20px;
+        color: #d60000;
+      }
+      
+      .item {
+        margin: 12px 0;
+        font-size: 18px;
+      }
+    </style>
+  </head>
+  
+  <body>
+    
+    <h1>🎍 正月おみくじ 🎍</h1>
+    
+    <button onclick="drawOmikuji()">おみくじを引く</button>
+    
+    <div id="omikuji">
+      <div class="title" id="title"></div>
+      <div class="item" id="health"></div>
+      <div class="item" id="work"></div>
+      <div class="item" id="message"></div>
+    </div>
+    
+    <script>
+      let data = [];
+      
+      fetch("omikuji.json")
+      .then(res => res.json())
+      .then(json => data = json);
+      
+      function drawOmikuji() {
+        if (data.length === 0) return;
+        
+        const pick = data[Math.floor(Math.random() * data.length)];
+        
+        document.getElementById("title").innerText = pick.title;
+        document.getElementById("health").innerText = "健康： " + pick.health;
+        document.getElementById("work").innerText   = "仕事： " + pick.work;
+        document.getElementById("message").innerText = "一言： " + pick.message;
+        
+        document.getElementById("omikuji").style.display = "block";
+      }
+    </script>
+    
+  </body>
+</html>
