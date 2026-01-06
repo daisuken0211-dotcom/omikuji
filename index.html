@@ -26,7 +26,10 @@
     justify-content: center;
     background: #000;
     z-index: 10;
-    font-size: 20px;
+    font-size: 18px;
+    text-align: center;
+    padding: 20px;
+    line-height: 1.6;
   }
   #result {
     position: fixed;
@@ -54,7 +57,12 @@
 
 <body>
 
-<div id="start">タップして開始</div>
+<div id="start">
+  タップして開始。<br>
+  落ちてくるおみくじから1枚選んで<br>
+  手で触りましょう。
+</div>
+
 <canvas id="canvas"></canvas>
 
 <div id="result">
@@ -72,11 +80,11 @@ import {
   HandLandmarker
 } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3";
 
-/* ===== 基本セットアップ ===== */
+/* ===== 基本 ===== */
 const canvas = document.getElementById("canvas");
 const ctx = canvas.getContext("2d");
-canvas.width = window.innerWidth;
-canvas.height = window.innerHeight;
+canvas.width = innerWidth;
+canvas.height = innerHeight;
 
 const video = document.createElement("video");
 video.playsInline = true;
@@ -104,72 +112,78 @@ async function initHandLandmarker() {
   });
 }
 
-/* ===== 手の更新（安定方式） ===== */
-function updateHands(results) {
+/* ===== 手更新（完全移植） ===== */
+function updateHands(res) {
   hands = [];
-  if (!results || !results.landmarks) return;
+  if (!res || !res.landmarks) return;
 
   const w = canvas.width;
   const h = canvas.height;
 
-  for (const hand of results.landmarks) {
+  for (const hand of res.landmarks) {
     const idx = [0,5,9,13,17];
     let sx = 0, sy = 0;
     for (const i of idx) {
       sx += hand[i].x;
       sy += hand[i].y;
     }
-    const x = (1 - sx / idx.length) * w;
-    const y = (sy / idx.length) * h;
-    hands.push({ x, y, r: 50 });
-  }
-}
-
-/* ===== 札 ===== */
-function spawnCards() {
-  if (selected) return;
-  for (let i = 0; i < 2; i++) {
-    cards.push({
-      x: 80 + Math.random() * (canvas.width - 160),
-      y: -100,
-      vy: canvas.height / 2,
-      r: 40
+    hands.push({
+      x: (1 - sx / idx.length) * w,
+      y: (sy / idx.length) * h,
+      r: 50
     });
   }
 }
+
+/* ===== おみくじ生成（最大2枚） ===== */
+function spawnCards() {
+  if (selected) return;
+  if (cards.length >= 2) return;
+
+  cards.push({
+    baseX: 80 + Math.random() * (canvas.width - 160),
+    x: 0,
+    y: -100,
+    vy: canvas.height / 2,
+    r: 40,
+    phase: Math.random() * Math.PI * 2
+  });
+}
 setInterval(spawnCards, 2000);
 
-/* ===== メインループ ===== */
-let lastTime = null;
+/* ===== ループ ===== */
+let last = null;
 function loop(t) {
-  if (!lastTime) lastTime = t;
-  const dt = (t - lastTime) / 1000;
-  lastTime = t;
+  if (!last) last = t;
+  const dt = (t - last) / 1000;
+  last = t;
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // ミラー表示
+  // ミラー映像
   ctx.save();
-  ctx.scale(-1, 1);
+  ctx.scale(-1,1);
   ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
   ctx.restore();
 
   // 手
   for (const h of hands) {
     ctx.beginPath();
-    ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2);
+    ctx.arc(h.x, h.y, h.r, 0, Math.PI*2);
     ctx.strokeStyle = "rgba(0,255,0,0.9)";
     ctx.lineWidth = 4;
     ctx.stroke();
   }
 
-  // 札
+  // おみくじ
   for (let i = cards.length - 1; i >= 0; i--) {
     const c = cards[i];
     c.y += c.vy * dt;
+    c.phase += dt;
+    c.x = c.baseX + Math.sin(c.phase * 2) * 40;
 
     ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
     ctx.fillStyle = "#fff";
     ctx.fill();
 
@@ -198,17 +212,18 @@ function choose() {
   selected = true;
   cards = [];
 
-  const pick = omikuji[Math.floor(Math.random() * omikuji.length)];
-  r_title.textContent = pick.title;
-  r_health.textContent = "健康：" + pick.health;
-  r_work.textContent = "仕事：" + pick.work;
-  r_message.textContent = pick.message;
+  const p = omikuji[Math.floor(Math.random() * omikuji.length)];
+  r_title.textContent = p.title;
+  r_health.textContent = "健康：" + p.health;
+  r_work.textContent = "仕事：" + p.work;
+  r_message.textContent = p.message;
   result.style.display = "flex";
 }
 
 /* ===== 開始 ===== */
 start.onclick = async () => {
   start.remove();
+
   const stream = await navigator.mediaDevices.getUserMedia({
     video: { facingMode: "user", width: 1280, height: 720 }
   });
@@ -219,8 +234,7 @@ start.onclick = async () => {
 
   setInterval(() => {
     const now = performance.now();
-    const res = handLandmarker.detectForVideo(video, now);
-    updateHands(res);
+    updateHands(handLandmarker.detectForVideo(video, now));
   }, 100);
 
   requestAnimationFrame(loop);
