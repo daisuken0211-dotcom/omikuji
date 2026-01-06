@@ -1,66 +1,46 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-<meta charset="UTF-8" />
-<title>ARおみくじ（安定版）</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta charset="UTF-8">
+<title>ARおみくじ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <style>
-  html, body {
-    margin: 0;
-    padding: 0;
-    overflow: hidden;
-    background: #000;
-    color: #fff;
-    font-family: system-ui, sans-serif;
-  }
-  canvas {
-    position: fixed;
-    inset: 0;
-  }
-  #start {
-    position: fixed;
-    inset: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: #000;
-    z-index: 10;
-    font-size: 18px;
-    text-align: center;
-    padding: 20px;
-    line-height: 1.6;
-  }
-  #result {
-    position: fixed;
-    inset: 0;
-    display: none;
-    align-items: center;
-    justify-content: center;
-    background: rgba(0,0,0,0.6);
-    z-index: 20;
-  }
-  #paper {
-    background: #fff;
-    color: #000;
-    border-radius: 16px;
-    padding: 24px;
-    width: 300px;
-    text-align: center;
-  }
-  #paper h2 {
-    color: #d60000;
-    margin: 0 0 10px;
-  }
+html,body{
+  margin:0;
+  padding:0;
+  overflow:hidden;
+  background:#000;
+  font-family:system-ui,sans-serif;
+}
+canvas{position:fixed;inset:0;}
+#start{
+  position:fixed;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  background:#000;color:#fff;
+  text-align:center;line-height:1.6;
+  z-index:10;font-size:18px;
+}
+#result{
+  position:fixed;inset:0;
+  display:none;align-items:center;justify-content:center;
+  background:rgba(0,0,0,.6);z-index:20;
+}
+#paper{
+  background:#fff;color:#000;
+  border-radius:16px;padding:24px;
+  width:300px;text-align:center;
+}
+#paper h2{color:#d60000;margin-bottom:10px;}
 </style>
 </head>
 
 <body>
 
 <div id="start">
-  タップして開始。<br>
-  落ちてくるおみくじから1枚選んで<br>
-  手で触りましょう。
+タップして開始。<br>
+落ちてくるおみくじから1枚選んで<br>
+手で触りましょう。
 </div>
 
 <canvas id="canvas"></canvas>
@@ -90,156 +70,151 @@ const video = document.createElement("video");
 video.playsInline = true;
 
 let handLandmarker;
-let hands = [];
-let cards = [];
-let selected = false;
+let hands=[];
+let cards=[];
+let selected=false;
 
-/* ===== おみくじ ===== */
-const omikuji = await fetch("omikuji.json").then(r => r.json());
+/* ===== おみくじ（重複なし） ===== */
+let omikuji = await fetch("omikuji.json").then(r=>r.json());
+omikuji = omikuji.sort(()=>Math.random()-0.5); // シャッフル
+let omikujiIndex = 0;
 
 /* ===== HandLandmarker ===== */
-async function initHandLandmarker() {
+async function initHand(){
   const vision = await FilesetResolver.forVisionTasks(
     "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.3/wasm"
   );
-  handLandmarker = await HandLandmarker.createFromOptions(vision, {
-    baseOptions: {
+  handLandmarker = await HandLandmarker.createFromOptions(vision,{
+    baseOptions:{
       modelAssetPath:
-        "https://storage.googleapis.com/mediapipe-tasks/hand_landmarker/hand_landmarker.task",
+      "https://storage.googleapis.com/mediapipe-tasks/hand_landmarker/hand_landmarker.task"
     },
-    numHands: 1,
-    runningMode: "VIDEO"
+    numHands:1,runningMode:"VIDEO"
   });
 }
 
-/* ===== 手更新（完全移植） ===== */
-function updateHands(res) {
-  hands = [];
-  if (!res || !res.landmarks) return;
-
-  const w = canvas.width;
-  const h = canvas.height;
-
-  for (const hand of res.landmarks) {
-    const idx = [0,5,9,13,17];
-    let sx = 0, sy = 0;
-    for (const i of idx) {
-      sx += hand[i].x;
-      sy += hand[i].y;
-    }
+/* ===== 手位置（安定方式） ===== */
+function updateHands(res){
+  hands=[];
+  if(!res||!res.landmarks)return;
+  for(const h of res.landmarks){
+    const idx=[0,5,9,13,17];
+    let sx=0,sy=0;
+    for(const i of idx){sx+=h[i].x;sy+=h[i].y;}
     hands.push({
-      x: (1 - sx / idx.length) * w,
-      y: (sy / idx.length) * h,
-      r: 50
+      x:(1-sx/idx.length)*canvas.width,
+      y:(sy/idx.length)*canvas.height,
+      r:60
     });
   }
 }
 
-/* ===== おみくじ生成（最大2枚） ===== */
-function spawnCards() {
-  if (selected) return;
-  if (cards.length >= 2) return;
+/* ===== おみくじ生成 ===== */
+function spawn(){
+  if(selected) return;
+  if(omikujiIndex>=12) return;
+  if(cards.length>=2) return;
 
   cards.push({
-    baseX: 80 + Math.random() * (canvas.width - 160),
-    x: 0,
-    y: -100,
-    vy: canvas.height / 2,
-    r: 40,
-    phase: Math.random() * Math.PI * 2
+    data: omikuji[omikujiIndex++],
+    x: Math.random()*(canvas.width-160)+80,
+    y:-120,
+    vy: canvas.height/5,      // 約5秒
+    sway: Math.random()*2+1,
+    rot: Math.random()*2,
+    angle: Math.random()*Math.PI,
+    w:70,h:120
   });
 }
-setInterval(spawnCards, 2000);
+
+setInterval(spawn,1500);
 
 /* ===== ループ ===== */
-let last = null;
-function loop(t) {
-  if (!last) last = t;
-  const dt = (t - last) / 1000;
-  last = t;
+let last=null;
+function loop(t){
+  if(!last)last=t;
+  const dt=(t-last)/1000;
+  last=t;
 
   ctx.clearRect(0,0,canvas.width,canvas.height);
 
   // ミラー映像
   ctx.save();
   ctx.scale(-1,1);
-  ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
+  ctx.drawImage(video,-canvas.width,0,canvas.width,canvas.height);
   ctx.restore();
 
   // 手
-  for (const h of hands) {
+  for(const h of hands){
     ctx.beginPath();
-    ctx.arc(h.x, h.y, h.r, 0, Math.PI*2);
-    ctx.strokeStyle = "rgba(0,255,0,0.9)";
-    ctx.lineWidth = 4;
-    ctx.stroke();
+    ctx.arc(h.x,h.y,h.r,0,Math.PI*2);
+    ctx.strokeStyle="rgba(0,255,0,.9)";
+    ctx.lineWidth=3;ctx.stroke();
   }
 
   // おみくじ
-  for (let i = cards.length - 1; i >= 0; i--) {
-    const c = cards[i];
-    c.y += c.vy * dt;
-    c.phase += dt;
-    c.x = c.baseX + Math.sin(c.phase * 2) * 40;
+  for(let i=cards.length-1;i>=0;i--){
+    const c=cards[i];
+    c.y+=c.vy*dt;
+    c.angle+=dt;
 
-    ctx.beginPath();
-    ctx.arc(c.x, c.y, c.r, 0, Math.PI*2);
-    ctx.fillStyle = "#fff";
-    ctx.fill();
+    const fx=c.x+Math.sin(c.angle*c.sway)*40;
 
-    ctx.fillStyle = "#d60000";
-    ctx.font = "18px sans-serif";
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
-    ctx.fillText("おみくじ", c.x, c.y);
+    ctx.save();
+    ctx.translate(fx,c.y);
+    ctx.rotate(Math.sin(c.angle)*0.3);
+    ctx.fillStyle="#fff";
+    ctx.fillRect(-c.w/2,-c.h/2,c.w,c.h);
+    ctx.strokeStyle="#d60000";
+    ctx.strokeRect(-c.w/2,-c.h/2,c.w,c.h);
+    ctx.fillStyle="#d60000";
+    ctx.font="14px sans-serif";
+    ctx.textAlign="center";
+    ctx.fillText("おみくじ",0,0);
+    ctx.restore();
 
-    for (const h of hands) {
-      if (Math.hypot(c.x - h.x, c.y - h.y) < c.r + h.r) {
-        choose();
+    // 当たり判定（円）
+    for(const h of hands){
+      if(Math.hypot(fx-h.x,c.y-h.y)<h.r){
+        choose(c.data);
         return;
       }
     }
 
-    if (c.y - c.r > canvas.height) cards.splice(i,1);
+    if(c.y>canvas.height+150) cards.splice(i,1);
   }
 
   requestAnimationFrame(loop);
 }
 
 /* ===== 結果 ===== */
-function choose() {
-  if (selected) return;
-  selected = true;
-  cards = [];
-
-  const p = omikuji[Math.floor(Math.random() * omikuji.length)];
-  r_title.textContent = p.title;
-  r_health.textContent = "健康：" + p.health;
-  r_work.textContent = "仕事：" + p.work;
-  r_message.textContent = p.message;
-  result.style.display = "flex";
+function choose(p){
+  if(selected)return;
+  selected=true;cards=[];
+  r_title.textContent=p.title;
+  r_health.textContent="健康："+p.health;
+  r_work.textContent="仕事："+p.work;
+  r_message.textContent=p.message;
+  result.style.display="flex";
 }
 
 /* ===== 開始 ===== */
-start.onclick = async () => {
+start.onclick=async()=>{
   start.remove();
-
-  const stream = await navigator.mediaDevices.getUserMedia({
-    video: { facingMode: "user", width: 1280, height: 720 }
+  const stream=await navigator.mediaDevices.getUserMedia({
+    video:{facingMode:"user",width:1280,height:720}
   });
-  video.srcObject = stream;
+  video.srcObject=stream;
   await video.play();
+  await initHand();
 
-  await initHandLandmarker();
-
-  setInterval(() => {
-    const now = performance.now();
-    updateHands(handLandmarker.detectForVideo(video, now));
-  }, 100);
+  setInterval(()=>{
+    const now=performance.now();
+    updateHands(handLandmarker.detectForVideo(video,now));
+  },100);
 
   requestAnimationFrame(loop);
 };
 </script>
-
 </body>
 </html>
