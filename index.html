@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>AR風 触って選ぶおみくじ</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<!-- MediaPipe Hands -->
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js"></script>
+
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    background: black;
+    font-family: "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
+  }
+
+  /* スマホ：カメラを画面いっぱい（鏡表示） */
+  video {
+    transform: scaleX(-1);
+    position: fixed;
+    inset: 0;
+    width: 100vw;
+    height: 100vh;
+    object-fit: cover;
+    z-index: 0;
+  }
+
+  h1 {
+    position: fixed;
+    top: 10px;
+    width: 100%;
+    text-align: center;
+    color: white;
+    z-index: 3;
+    text-shadow: 0 0 8px black;
+    font-size: 18px;
+    margin: 0;
+    padding: 0 12px;
+    box-sizing: border-box;
+    pointer-events: none;
+  }
+
+  #field {
+    position: fixed;
+    inset: 0;
+    z-index: 2;
+    pointer-events: none;
+  }
+
+  /* 札は少し小さめ */
+  .card {
+    position: absolute;
+    top: -140px;
+    width: 80px;
+    height: 120px;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    font-weight: bold;
+    color: #d60000;
+    user-select: none;
+    pointer-events: auto;
+    animation: fall 2s linear forwards; /* ← 落下2秒 */
+    --drift: 0px;
+    --rot: 0deg;
+    --sway: 0px;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  .card.near {
+    outline: 3px solid rgba(255, 255, 255, 0.9);
+    box-shadow: 0 10px 28px rgba(255,255,255,0.25);
+  }
+
+  @keyframes fall {
+    0% {
+      transform: translateY(0) translateX(0) rotate(0deg);
+      opacity: 0;
+    }
+    10% { opacity: 1; }
+    55% {
+      transform: translateY(60vh) translateX(var(--sway)) rotate(calc(var(--rot) * 0.6));
+      opacity: 1;
+    }
+    100% {
+      transform: translateY(120vh) translateX(var(--drift)) rotate(var(--rot));
+      opacity: 1;
+    }
+  }
+
+  #result {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.6);
+    display: none;
+    align-items: center;
+    justify-content: center;
+    z-index: 5;
+  }
+
+  #paper {
+    background: white;
+    border-radius: 16px;
+    padding: 22px 22px 18px;
+    width: min(340px, 88vw);
+    text-align: center;
+  }
+
+  .title {
+    font-size: 26px;
+    color: #d60000;
+    margin-bottom: 10px;
+    font-weight: 800;
+  }
+
+  .item {
+    margin: 6px 0;
+    font-size: 15px;
+    line-height: 1.45;
+  }
+
+  .actions {
+    margin-top: 12px;
+    display: flex;
+    justify-content: center;
+    gap: 10px;
+  }
+  .btn {
+    border: none;
+    border-radius: 12px;
+    padding: 10px 14px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  .btn.primary { background: #d60000; color: #fff; }
+  .btn.ghost { background: rgba(0,0,0,0.08); }
+</style>
+</head>
+
+<body>
+
+<h1>✋ ひらひら落ちるおみくじに触れてください（PCはクリック） ✋</h1>
+<video id="video" autoplay muted playsinline></video>
+<div id="field"></div>
+
+<div id="result" aria-live="polite">
+  <div id="paper">
+    <div class="title" id="r_title"></div>
+    <div class="item" id="r_health"></div>
+    <div class="item" id="r_work"></div>
+    <div class="item" id="r_message"></div>
+    <div class="actions">
+      <button class="btn primary" id="againBtn">もう一度</button>
+      <button class="btn ghost" id="closeBtn">閉じる</button>
+    </div>
+  </div>
+</div>
+
+<script>
+let omikuji = [];
+let cards = [];
+let selected = false;
+let handPos = null;
+let spawnTimer = null;
+
+const field = document.getElementById("field");
+const video = document.getElementById("video");
+const result = document.getElementById("result");
+const againBtn = document.getElementById("againBtn");
+const closeBtn = document.getElementById("closeBtn");
+
+// JSON
+fetch("omikuji.json", { cache: "no-store" })
+  .then(r => r.json())
+  .then(j => {
+    omikuji = j;
+    startSpawning();
+  })
+  .catch(() => {
+    alert("omikuji.json の読み込みに失敗しました。index.html と同じフォルダに置いてください。");
+  });
+
+// 2枚ずつ、落ち葉っぽく（出現間隔2秒）
+function startSpawning() {
+  if (spawnTimer) clearInterval(spawnTimer);
+  spawnCards(2);
+  spawnTimer = setInterval(() => {
+    if (!selected) spawnCards(2);
+  }, 2000);
+}
+
+function stopSpawning() {
+  if (spawnTimer) {
+    clearInterval(spawnTimer);
+    spawnTimer = null;
+  }
+}
+
+function spawnCards(n) {
+  for (let i = 0; i < n; i++) {
+    const c = document.createElement("div");
+    c.className = "card";
+    c.innerText = "おみくじ";
+
+    // 位置
+    c.style.left = Math.random() * (window.innerWidth - 80) + "px";
+
+    // 落ち葉っぽく：左右にランダムで流れる
+    const drift = (Math.random() * 120 - 60);   // -60..60
+    const sway  = (Math.random() * 100 - 50);   // -50..50
+    const rot   = (Math.random() * 30 - 15);    // -15..15
+    c.style.setProperty("--drift", drift + "px");
+    c.style.setProperty("--sway", sway + "px");
+    c.style.setProperty("--rot", rot + "deg");
+
+    // クリック/タップで取得（PCフォールバック）
+    c.addEventListener("click", () => choose(c));
+
+    // 落ちきったら自動削除（溜まり防止）
+    c.addEventListener("animationend", () => {
+      c.remove();
+      cards = cards.filter(x => x !== c);
+    });
+
+    field.appendChild(c);
+    cards.push(c);
+  }
+}
+
+function pickOmikuji() {
+  return omikuji[Math.floor(Math.random() * omikuji.length)];
+}
+
+function showResult(pick) {
+  document.getElementById("r_title").innerText = pick.title;
+  document.getElementById("r_health").innerText = "健康： " + pick.health;
+  document.getElementById("r_work").innerText   = "仕事： " + pick.work;
+  document.getElementById("r_message").innerText = "一言： " + pick.message;
+  result.style.display = "flex";
+}
+
+function choose(card) {
+  if (selected) return;
+  selected = true;
+  stopSpawning();
+
+  // 札を消す
+  cards.forEach(c => c.remove());
+  cards = [];
+
+  // おみくじ表示
+  const pick = pickOmikuji();
+  showResult(pick);
+}
+
+function resetGame() {
+  selected = false;
+  result.style.display = "none";
+  cards.forEach(c => c.remove());
+  cards = [];
+  startSpawning();
+}
+
+againBtn.addEventListener("click", resetGame);
+closeBtn.addEventListener("click", () => { result.style.display = "none"; });
+
+// ===== 手検出（触れたらOK）=====
+// 触った判定：手のひら中心が札の中心に近ければOK（甘めで成功しやすい）
+const HIT_RADIUS = 60; // px（必要なら 80 まで上げるとさらに取りやすい）
+
+if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+  const hands = new Hands({
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+  });
+
+  hands.setOptions({
+    maxNumHands: 1,
+    modelComplexity: 0,
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5
+  });
+
+  hands.onResults(res => {
+    if (selected) return;
+
+    if (!res.multiHandLandmarks) {
+      handPos = null;
+      cards.forEach(c => c.classList.remove("near"));
+      return;
+    }
+
+    // 手のひら中心（0）で安定
+    const palm = res.multiHandLandmarks[0][0];
+
+    // videoは鏡表示なので X は (1 - x)
+    handPos = {
+      x: (1 - palm.x) * window.innerWidth,
+      y: palm.y * window.innerHeight
+    };
+
+    // 近い札をハイライト & 取る
+    let best = null;
+    let bestD = Infinity;
+
+    for (const c of cards) {
+      const r = c.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const dx = handPos.x - cx;
+      const dy = handPos.y - cy;
+      const d = Math.sqrt(dx*dx + dy*dy);
+
+      if (d < bestD) { bestD = d; best = c; }
+    }
+
+    cards.forEach(c => c.classList.remove("near"));
+    if (best && bestD < 110) best.classList.add("near"); // 近い時だけ光る
+
+    if (best && bestD < HIT_RADIUS) {
+      choose(best);
+    }
+  });
+
+  const cam = new Camera(video, {
+    onFrame: async () => { await hands.send({ image: video }); },
+    width: 640,
+    height: 480
+  });
+  cam.start();
+
+} else {
+  // カメラ無し（PC想定）：背景を黒にしてクリックだけで遊べる
+  video.style.display = "none";
+}
+</script>
+
+</body>
+</html>
