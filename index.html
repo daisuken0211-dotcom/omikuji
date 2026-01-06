@@ -19,7 +19,7 @@ canvas {
   inset: 0;
 }
 
-/* 開始画面 */
+/* 開始説明 */
 #start {
   position: fixed;
   inset: 0;
@@ -50,7 +50,7 @@ canvas {
   pointer-events: none;
 }
 
-/* 結果表示 */
+/* 結果 */
 #result {
   position: fixed;
   inset: 0;
@@ -119,13 +119,15 @@ let handLandmarker;
 let hands = [];
 let cards = [];
 let selected = false;
+let gameStarted = false;
 
 /* ===== おみくじ ===== */
 let omikuji = await fetch("omikuji.json").then(r => r.json());
 omikuji = omikuji.sort(() => Math.random() - 0.5);
 
 const MAX_OMIKUJI = 20;
-let omikujiIndex = 0;
+let usedCount = 0;      // 消えた枚数
+let omikujiIndex = 0;  // 生成順
 
 /* ===== HandLandmarker ===== */
 async function initHand() {
@@ -142,7 +144,7 @@ async function initHand() {
   });
 }
 
-/* ===== 手更新（安定方式） ===== */
+/* ===== 手更新 ===== */
 function updateHands(res) {
   hands = [];
   if (!res || !res.landmarks) return;
@@ -164,11 +166,12 @@ function updateHands(res) {
 
 /* ===== 残り枚数 ===== */
 function updateCounter() {
-  counterEl.textContent = `残り ${MAX_OMIKUJI - omikujiIndex} 枚`;
+  counterEl.textContent = `残り ${MAX_OMIKUJI - usedCount} 枚`;
 }
 
 /* ===== おみくじ生成 ===== */
 function spawn() {
+  if (!gameStarted) return;
   if (selected) return;
   if (omikujiIndex >= MAX_OMIKUJI) return;
   if (cards.length >= 2) return;
@@ -183,13 +186,12 @@ function spawn() {
     w: 70,
     h: 120
   });
-
-  updateCounter();
 }
 
+/* 落下間隔 */
 setInterval(spawn, 1500);
 
-/* ===== メインループ ===== */
+/* ===== ループ ===== */
 let last = null;
 function loop(t) {
   if (!last) last = t;
@@ -198,13 +200,13 @@ function loop(t) {
 
   ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-  /* ミラー映像 */
+  // ミラー映像
   ctx.save();
   ctx.scale(-1, 1);
   ctx.drawImage(video, -canvas.width, 0, canvas.width, canvas.height);
   ctx.restore();
 
-  /* 手描画 */
+  // 手
   for (const h of hands) {
     ctx.beginPath();
     ctx.arc(h.x, h.y, h.r, 0, Math.PI * 2);
@@ -213,7 +215,7 @@ function loop(t) {
     ctx.stroke();
   }
 
-  /* おみくじ描画 */
+  // おみくじ
   for (let i = cards.length - 1; i >= 0; i--) {
     const c = cards[i];
     c.y += c.vy * dt;
@@ -234,7 +236,7 @@ function loop(t) {
     ctx.fillText("おみくじ", 0, 0);
     ctx.restore();
 
-    /* 当たり判定 */
+    // 当たり判定
     for (const h of hands) {
       if (Math.hypot(fx - h.x, c.y - h.y) < h.r) {
         choose(c.data);
@@ -242,7 +244,12 @@ function loop(t) {
       }
     }
 
-    if (c.y > canvas.height + 150) cards.splice(i, 1);
+    // 画面下で消えたらカウント減少
+    if (c.y > canvas.height + 150) {
+      cards.splice(i, 1);
+      usedCount++;
+      updateCounter();
+    }
   }
 
   requestAnimationFrame(loop);
@@ -264,6 +271,7 @@ function choose(p) {
 /* ===== 開始 ===== */
 start.onclick = async () => {
   start.remove();
+  gameStarted = true;
   updateCounter();
 
   const stream = await navigator.mediaDevices.getUserMedia({
