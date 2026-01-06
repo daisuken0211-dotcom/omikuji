@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<title>AR風 手で選ぶおみくじ</title>
+<title>AR風 触って選ぶおみくじ</title>
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
 <!-- MediaPipe Hands -->
@@ -13,51 +13,68 @@
   body {
     margin: 0;
     overflow: hidden;
+    background: black;
     font-family: "Hiragino Kaku Gothic ProN", Meiryo, sans-serif;
-    background: #000;
   }
+
   video {
     position: fixed;
     inset: 0;
+    width: 100vw;
+    height: 100vh;
     object-fit: cover;
     z-index: 0;
   }
+
   h1 {
     position: fixed;
     top: 10px;
     width: 100%;
     text-align: center;
     color: white;
-    z-index: 2;
+    z-index: 3;
     text-shadow: 0 0 8px black;
+    font-size: 18px;
   }
+
   #field {
     position: fixed;
     inset: 0;
-    z-index: 1;
+    z-index: 2;
+    pointer-events: none;
   }
+
   .card {
     position: absolute;
-    top: -200px;
-    width: 120px;
-    height: 180px;
+    top: -120px;
+    width: 80px;
+    height: 120px;
     background: white;
-    border-radius: 12px;
-    box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    border-radius: 10px;
+    box-shadow: 0 8px 20px rgba(0,0,0,0.35);
     display: flex;
     align-items: center;
     justify-content: center;
-    font-size: 22px;
+    font-size: 14px;
     font-weight: bold;
     color: #d60000;
-    cursor: pointer;
     user-select: none;
-    animation: fall linear forwards;
+    pointer-events: auto;
+    animation: fall 2s linear forwards;
   }
+
   @keyframes fall {
-    from { transform: translateY(0); opacity: 0; }
-    to   { transform: translateY(120vh); opacity: 1; }
+    0% {
+      transform: translateY(0) translateX(0) rotate(0deg);
+      opacity: 0;
+    }
+    10% { opacity: 1; }
+    100% {
+      transform: translateY(120vh) translateX(40px) rotate(20deg);
+      opacity: 1;
+    }
   }
+
   #result {
     position: fixed;
     inset: 0;
@@ -67,6 +84,7 @@
     justify-content: center;
     z-index: 5;
   }
+
   #paper {
     background: white;
     border-radius: 16px;
@@ -74,21 +92,23 @@
     width: 300px;
     text-align: center;
   }
+
   .title {
-    font-size: 28px;
+    font-size: 26px;
     color: #d60000;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
   }
+
   .item {
-    margin: 8px 0;
-    font-size: 16px;
+    margin: 6px 0;
+    font-size: 15px;
   }
 </style>
 </head>
 
 <body>
 
-<h1>✋ 手を握って おみくじを選ぼう ✋</h1>
+<h1>✋ ひらひら落ちるおみくじに触れてください ✋</h1>
 <video id="video" autoplay muted playsinline></video>
 <div id="field"></div>
 
@@ -105,100 +125,91 @@
 let omikuji = [];
 let cards = [];
 let selected = false;
+let handPos = null;
 
-// JSON読み込み
+// JSON
 fetch("omikuji.json").then(r => r.json()).then(j => {
   omikuji = j;
-  spawnCards();
+  spawnLoop();
 });
 
-// 札生成
-function spawnCards() {
+// 2枚ずつ落とす
+function spawnLoop() {
+  spawnCards(2);
+  setTimeout(spawnLoop, 2000);
+}
+
+function spawnCards(n) {
   const field = document.getElementById("field");
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < n; i++) {
     const c = document.createElement("div");
     c.className = "card";
     c.innerText = "おみくじ";
-    c.style.left = Math.random() * (window.innerWidth - 120) + "px";
-    c.style.animationDuration = (6 + Math.random() * 3) + "s";
+    c.style.left = Math.random() * (window.innerWidth - 80) + "px";
     c.onclick = () => choose(c);
     field.appendChild(c);
     cards.push(c);
   }
 }
 
-// 結果表示
 function choose(card) {
   if (selected) return;
   selected = true;
   cards.forEach(c => c.remove());
+
   const pick = omikuji[Math.floor(Math.random() * omikuji.length)];
   r_title.innerText = pick.title;
   r_health.innerText = "健康： " + pick.health;
-  r_work.innerText   = "仕事： " + pick.work;
+  r_work.innerText = "仕事： " + pick.work;
   r_message.innerText = "一言： " + pick.message;
   result.style.display = "flex";
 }
 
-// ==== 手の検出（スマホ用）====
-if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+// ===== 手検出（触れたらOK）=====
+if (navigator.mediaDevices) {
   const video = document.getElementById("video");
   const hands = new Hands({
-    locateFile: file => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+    locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
   });
+
   hands.setOptions({
     maxNumHands: 1,
     modelComplexity: 0,
-    minDetectionConfidence: 0.7,
-    minTrackingConfidence: 0.6
+    minDetectionConfidence: 0.6,
+    minTrackingConfidence: 0.5
   });
 
   hands.onResults(res => {
     if (selected) return;
     if (!res.multiHandLandmarks) return;
 
-    const lm = res.multiHandLandmarks[0];
-    if (isFist(lm)) {
-      chooseNearest();
-    }
+    const tip = res.multiHandLandmarks[0][8]; // 人差し指先
+    handPos = {
+      x: (1 - tip.x) * window.innerWidth,
+      y: tip.y * window.innerHeight
+    };
+
+    cards.forEach(c => {
+      const r = c.getBoundingClientRect();
+      if (
+        handPos.x > r.left &&
+        handPos.x < r.right &&
+        handPos.y > r.top &&
+        handPos.y < r.bottom
+      ) {
+        choose(c);
+      }
+    });
   });
 
-  const camera = new Camera(video, {
+  const cam = new Camera(video, {
     onFrame: async () => { await hands.send({ image: video }); },
     width: 640,
     height: 480
   });
-  camera.start();
-
-  // グー判定
-  function isFist(lm) {
-    const palm = lm[0];
-    const tips = [8,12,16,20];
-    let close = 0;
-    tips.forEach(i => {
-      const dx = lm[i].x - palm.x;
-      const dy = lm[i].y - palm.y;
-      if (Math.sqrt(dx*dx + dy*dy) < 0.08) close++;
-    });
-    return close >= 3;
-  }
-
-  function chooseNearest() {
-    let min = Infinity;
-    let target = null;
-    cards.forEach(c => {
-      const r = c.getBoundingClientRect();
-      const d = Math.abs(r.left + r.width/2 - window.innerWidth/2);
-      if (d < min) {
-        min = d;
-        target = c;
-      }
-    });
-    if (target) choose(target);
-  }
+  cam.start();
 } else {
-  // PC（カメラなし）
-  document.getElementById("video").style.display = "none";
+  video.style.display = "none";
 }
 </script>
 
